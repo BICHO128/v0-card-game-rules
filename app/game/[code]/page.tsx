@@ -15,50 +15,49 @@ export default function GamePage() {
   const router = useRouter()
   const roomCode = params.code as string
 
-  const { gameState, players, initializeGame, currentTurnPlayerId, startTime } = useGameStore()
+  const gameState = useGameStore((state) => state.gameState)
+  const players = useGameStore((state) => state.players)
+  const currentTurnPlayerId = useGameStore((state) => state.currentTurnPlayerId)
+  const startTime = useGameStore((state) => state.startTime)
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId)
+  const subscribeToRoom = useGameStore((state) => state.subscribeToRoom)
+  const unsubscribeFromRoom = useGameStore((state) => state.unsubscribeFromRoom)
+
   const [isLoading, setIsLoading] = useState(true)
-  const [currentPlayerId, setCurrentPlayerId] = useState<string>("")
 
   useEffect(() => {
-    // Cargar datos del localStorage
-    const storedPlayers = localStorage.getItem("players")
-    const playerName = localStorage.getItem("playerName")
-
-    if (!storedPlayers || !playerName) {
+    // Verificar que tengamos un jugador actual
+    const storedPlayerId = currentPlayerId
+    if (!storedPlayerId) {
       router.push("/")
       return
     }
 
-    const playersData = JSON.parse(storedPlayers)
-    const playerNames = playersData.map((p: any) => p.name)
+    subscribeToRoom(roomCode)
+    setIsLoading(false)
 
-    // Inicializar el juego
-    initializeGame(roomCode, playerNames)
+    return () => {
+      unsubscribeFromRoom()
+    }
+  }, [roomCode, currentPlayerId, router, subscribeToRoom, unsubscribeFromRoom])
 
-    // Encontrar el ID del jugador actual
-    setTimeout(() => {
-      const currentPlayer = useGameStore.getState().players.find((p) => p.name === playerName)
-      if (currentPlayer) {
-        setCurrentPlayerId(currentPlayer.id)
-      }
-      setIsLoading(false)
-    }, 100)
-  }, [roomCode, router, initializeGame])
-
-  const handleTimeUp = () => {
-    const { players, startTime } = useGameStore.getState()
-    const gameEnd = useGameStore.getState()
+  const handleTimeUp = async () => {
+    const { players } = useGameStore.getState()
+    const supabase = (await import("@/lib/supabase-client")).getSupabaseClient()
 
     // Forzar el fin del juego por timeout
     const sortedPlayers = [...players].sort((a, b) => b.cards.length - a.cards.length)
     const maxCards = sortedPlayers[0].cards.length
     const winners = sortedPlayers.filter((p) => p.cards.length === maxCards)
 
-    useGameStore.setState({
-      gameState: "finished",
-      winnerId: winners.length === 1 ? winners[0].id : null,
-      gameEndReason: "timeout",
-    })
+    await supabase
+      .from("game_rooms")
+      .update({
+        state: "finished",
+        winner_id: winners.length === 1 ? winners[0].id : null,
+        game_end_reason: "timeout",
+      })
+      .eq("code", roomCode)
   }
 
   if (isLoading) {
@@ -81,18 +80,22 @@ export default function GamePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <GameHeader roomCode={roomCode} players={players} currentPlayerId={currentPlayerId} />
+      <GameHeader roomCode={roomCode} players={players} currentPlayerId={currentPlayerId || ""} />
 
       <div className="container mx-auto px-4 py-6 space-y-6">
         {startTime && <GameTimer startTime={startTime} onTimeUp={handleTimeUp} />}
 
-        <GameBoard players={players} currentTurnPlayerId={currentTurnPlayerId} currentPlayerId={currentPlayerId} />
+        <GameBoard
+          players={players}
+          currentTurnPlayerId={currentTurnPlayerId}
+          currentPlayerId={currentPlayerId || ""}
+        />
 
         {currentPlayer && currentPlayer.cards.length > 0 && (
           <PlayerHand
             card={currentPlayer.cards[0]}
             isMyTurn={isMyTurn}
-            playerId={currentPlayerId}
+            playerId={currentPlayerId || ""}
             totalCards={currentPlayer.cards.length}
           />
         )}

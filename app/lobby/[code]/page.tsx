@@ -7,12 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Copy, Check, Users, Play, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-
-type LobbyPlayer = {
-  id: string
-  name: string
-  isHost: boolean
-}
+import { useGameStore } from "@/lib/game-store"
 
 export default function LobbyPage() {
   const params = useParams()
@@ -20,27 +15,32 @@ export default function LobbyPage() {
   const { toast } = useToast()
   const roomCode = params.code as string
 
-  const [players, setPlayers] = useState<LobbyPlayer[]>([])
+  const players = useGameStore((state) => state.players)
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId)
+  const gameState = useGameStore((state) => state.gameState)
+  const subscribeToRoom = useGameStore((state) => state.subscribeToRoom)
+  const unsubscribeFromRoom = useGameStore((state) => state.unsubscribeFromRoom)
+  const startGame = useGameStore((state) => state.startGame)
+
   const [copied, setCopied] = useState(false)
-  const [isHost, setIsHost] = useState(false)
-  const [playerName, setPlayerName] = useState("")
+  const [isStarting, setIsStarting] = useState(false)
 
   useEffect(() => {
-    // Cargar datos del localStorage
-    const storedName = localStorage.getItem("playerName") || "Jugador"
-    const storedIsHost = localStorage.getItem("isHost") === "true"
-    setPlayerName(storedName)
-    setIsHost(storedIsHost)
+    subscribeToRoom(roomCode)
 
-    // Simular jugadores (en producción esto vendría de un servidor)
-    const currentPlayer: LobbyPlayer = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: storedName,
-      isHost: storedIsHost,
+    return () => {
+      unsubscribeFromRoom()
     }
+  }, [roomCode, subscribeToRoom, unsubscribeFromRoom])
 
-    setPlayers([currentPlayer])
-  }, [])
+  useEffect(() => {
+    if (gameState === "playing") {
+      router.push(`/game/${roomCode}`)
+    }
+  }, [gameState, roomCode, router])
+
+  const currentPlayer = players.find((p) => p.id === currentPlayerId)
+  const isHost = currentPlayer ? players[0]?.id === currentPlayerId : false
 
   const copyRoomCode = () => {
     navigator.clipboard.writeText(roomCode)
@@ -52,7 +52,7 @@ export default function LobbyPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const startGame = () => {
+  const handleStartGame = async () => {
     if (players.length < 2) {
       toast({
         title: "Jugadores insuficientes",
@@ -62,9 +62,18 @@ export default function LobbyPage() {
       return
     }
 
-    // Guardar jugadores en localStorage
-    localStorage.setItem("players", JSON.stringify(players))
-    router.push(`/game/${roomCode}`)
+    setIsStarting(true)
+    try {
+      await startGame()
+    } catch (error) {
+      console.error("[v0] Error starting game:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo iniciar el juego. Intenta de nuevo.",
+        variant: "destructive",
+      })
+      setIsStarting(false)
+    }
   }
 
   return (
@@ -94,10 +103,10 @@ export default function LobbyPage() {
                 <span>Jugadores ({players.length}/4)</span>
               </div>
               <div className="space-y-2">
-                {players.map((player) => (
+                {players.map((player, index) => (
                   <div key={player.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
                     <span className="font-medium">{player.name}</span>
-                    {player.isHost && <Badge variant="secondary">Anfitrión</Badge>}
+                    {index === 0 && <Badge variant="secondary">Anfitrión</Badge>}
                   </div>
                 ))}
                 {players.length < 4 && (
@@ -113,9 +122,14 @@ export default function LobbyPage() {
 
             {/* Botón de Inicio */}
             {isHost && (
-              <Button className="w-full" size="lg" onClick={startGame} disabled={players.length < 2}>
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={handleStartGame}
+                disabled={players.length < 2 || isStarting}
+              >
                 <Play className="w-5 h-5 mr-2" />
-                Iniciar Partida
+                {isStarting ? "Iniciando..." : "Iniciar Partida"}
               </Button>
             )}
 

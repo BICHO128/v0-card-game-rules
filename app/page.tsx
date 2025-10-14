@@ -8,33 +8,75 @@ import { Label } from "@/components/ui/label"
 import { Gamepad2, Users, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { generateRoomCode } from "@/lib/game-logic"
+import { useGameStore } from "@/lib/game-store"
+import { useToast } from "@/hooks/use-toast"
 
 export default function HomePage() {
   const router = useRouter()
+  const { toast } = useToast()
+  const createRoom = useGameStore((state) => state.createRoom)
+  const joinRoom = useGameStore((state) => state.joinRoom)
+
   const [playerName, setPlayerName] = useState("")
   const [roomCode, setRoomCode] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
 
-  const handleCreateRoom = () => {
+  const handleCreateRoom = async () => {
     if (!playerName.trim()) return
     setIsCreating(true)
-    const code = generateRoomCode()
-    // Guardar en localStorage
-    localStorage.setItem("playerName", playerName)
-    localStorage.setItem("roomCode", code)
-    localStorage.setItem("isHost", "true")
-    router.push(`/lobby/${code}`)
+
+    try {
+      const code = generateRoomCode()
+      await createRoom(code, playerName)
+
+      // Guardar en localStorage para persistencia
+      localStorage.setItem("playerName", playerName)
+      localStorage.setItem("roomCode", code)
+
+      router.push(`/lobby/${code}`)
+    } catch (error) {
+      console.error("[v0] Error creating room:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo crear la sala. Intenta de nuevo.",
+        variant: "destructive",
+      })
+      setIsCreating(false)
+    }
   }
 
-  const handleJoinRoom = () => {
+  const handleJoinRoom = async () => {
     if (!playerName.trim() || !roomCode.trim()) return
     setIsJoining(true)
-    // Guardar en localStorage
-    localStorage.setItem("playerName", playerName)
-    localStorage.setItem("roomCode", roomCode.toUpperCase())
-    localStorage.setItem("isHost", "false")
-    router.push(`/lobby/${roomCode.toUpperCase()}`)
+
+    try {
+      const code = roomCode.toUpperCase()
+      const success = await joinRoom(code, playerName)
+
+      if (success) {
+        // Guardar en localStorage para persistencia
+        localStorage.setItem("playerName", playerName)
+        localStorage.setItem("roomCode", code)
+
+        router.push(`/lobby/${code}`)
+      } else {
+        toast({
+          title: "Error",
+          description: "No se pudo unir a la sala. Verifica el código.",
+          variant: "destructive",
+        })
+        setIsJoining(false)
+      }
+    } catch (error) {
+      console.error("[v0] Error joining room:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo unir a la sala. Intenta de nuevo.",
+        variant: "destructive",
+      })
+      setIsJoining(false)
+    }
   }
 
   return (
