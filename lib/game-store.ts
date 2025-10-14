@@ -128,15 +128,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
   subscribeToRoom: (roomCode: string) => {
     const supabase = getSupabaseClient()
 
+    console.log("[v0] Subscribing to room:", roomCode)
+
     // Cancelar suscripción anterior si existe
     const { realtimeChannel } = get()
     if (realtimeChannel) {
+      console.log("[v0] Removing previous channel")
       supabase.removeChannel(realtimeChannel)
     }
 
     // Crear nueva suscripción
     const channel = supabase
-      .channel(`room:${roomCode}`)
+      .channel(`room:${roomCode}`, {
+        config: {
+          broadcast: { self: true },
+        },
+      })
       .on(
         "postgres_changes",
         {
@@ -145,9 +152,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           table: "game_players",
           filter: `room_code=eq.${roomCode}`,
         },
-        async () => {
+        (payload) => {
+          console.log("[v0] Players changed:", payload)
           // Recargar jugadores cuando hay cambios
-          await loadPlayers(roomCode)
+          loadPlayers(roomCode)
         },
       )
       .on(
@@ -158,9 +166,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           table: "game_rooms",
           filter: `code=eq.${roomCode}`,
         },
-        async () => {
+        (payload) => {
+          console.log("[v0] Room state changed:", payload)
           // Recargar estado del juego cuando hay cambios
-          await loadGameState(roomCode)
+          loadGameState(roomCode)
         },
       )
       .on(
@@ -171,12 +180,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
           table: "cards_in_play",
           filter: `room_code=eq.${roomCode}`,
         },
-        async () => {
+        (payload) => {
+          console.log("[v0] Cards in play changed:", payload)
           // Recargar cartas en juego cuando hay cambios
-          await loadCardsInPlay(roomCode)
+          loadCardsInPlay(roomCode)
         },
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log("[v0] Subscription status:", status)
+      })
 
     set({ realtimeChannel: channel })
 
@@ -187,13 +199,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // Función para cargar jugadores
     async function loadPlayers(code: string) {
-      const { data: playersData } = await supabase
+      console.log("[v0] Loading players for room:", code)
+      const { data: playersData, error } = await supabase
         .from("game_players")
         .select("*")
         .eq("room_code", code)
         .order("joined_at", { ascending: true })
 
+      if (error) {
+        console.error("[v0] Error loading players:", error)
+        return
+      }
+
       if (playersData) {
+        console.log("[v0] Players loaded:", playersData)
         const players: Player[] = playersData.map((p) => ({
           id: p.player_id,
           name: p.name,

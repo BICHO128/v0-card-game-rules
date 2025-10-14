@@ -47,6 +47,10 @@ ALTER TABLE game_players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cards_in_play ENABLE ROW LEVEL SECURITY;
 
 -- Políticas de seguridad (permitir todo por ahora para simplificar)
+DROP POLICY IF EXISTS "Allow all operations on game_rooms" ON game_rooms;
+DROP POLICY IF EXISTS "Allow all operations on game_players" ON game_players;
+DROP POLICY IF EXISTS "Allow all operations on cards_in_play" ON cards_in_play;
+
 CREATE POLICY "Allow all operations on game_rooms" ON game_rooms FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on game_players" ON game_players FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on cards_in_play" ON cards_in_play FOR ALL USING (true) WITH CHECK (true);
@@ -61,6 +65,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger para actualizar updated_at
+DROP TRIGGER IF EXISTS update_game_rooms_updated_at ON game_rooms;
 CREATE TRIGGER update_game_rooms_updated_at
   BEFORE UPDATE ON game_rooms
   FOR EACH ROW

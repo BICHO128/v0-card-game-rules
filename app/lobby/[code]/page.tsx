@@ -26,12 +26,18 @@ export default function LobbyPage() {
   const [isStarting, setIsStarting] = useState(false)
 
   useEffect(() => {
+    console.log("[v0] Lobby mounted, subscribing to room:", roomCode)
     subscribeToRoom(roomCode)
 
     return () => {
+      console.log("[v0] Lobby unmounting, unsubscribing from room")
       unsubscribeFromRoom()
     }
   }, [roomCode, subscribeToRoom, unsubscribeFromRoom])
+
+  useEffect(() => {
+    console.log("[v0] Players updated:", players)
+  }, [players])
 
   useEffect(() => {
     if (gameState === "playing") {
