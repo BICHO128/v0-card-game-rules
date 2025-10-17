@@ -5,9 +5,10 @@ import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Copy, Check, Users, Play, Loader2 } from "lucide-react"
+import { Copy, Check, Users, Play, Loader2, Wifi, WifiOff, AlertCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useGameStore } from "@/lib/game-store"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function LobbyPage() {
   const params = useParams()
@@ -18,9 +19,13 @@ export default function LobbyPage() {
   const players = useGameStore((state) => state.players)
   const currentPlayerId = useGameStore((state) => state.currentPlayerId)
   const gameState = useGameStore((state) => state.gameState)
+  const isHostDisconnected = useGameStore((state) => state.isHostDisconnected)
   const subscribeToRoom = useGameStore((state) => state.subscribeToRoom)
   const unsubscribeFromRoom = useGameStore((state) => state.unsubscribeFromRoom)
   const startGame = useGameStore((state) => state.startGame)
+  const startHeartbeat = useGameStore((state) => state.startHeartbeat)
+  const leaveRoom = useGameStore((state) => state.leaveRoom)
+  const resetGame = useGameStore((state) => state.resetGame)
 
   const [copied, setCopied] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
@@ -28,12 +33,20 @@ export default function LobbyPage() {
   useEffect(() => {
     console.log("[v0] Lobby mounted, subscribing to room:", roomCode)
     subscribeToRoom(roomCode)
+    startHeartbeat()
+
+    const handleBeforeUnload = () => {
+      leaveRoom()
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
 
     return () => {
       console.log("[v0] Lobby unmounting, unsubscribing from room")
+      window.removeEventListener("beforeunload", handleBeforeUnload)
       unsubscribeFromRoom()
     }
-  }, [roomCode, subscribeToRoom, unsubscribeFromRoom])
+  }, [roomCode, subscribeToRoom, unsubscribeFromRoom, startHeartbeat, leaveRoom])
 
   useEffect(() => {
     console.log("[v0] Players updated:", players)
@@ -44,6 +57,24 @@ export default function LobbyPage() {
       router.push(`/game/${roomCode}`)
     }
   }, [gameState, roomCode, router])
+
+  useEffect(() => {
+    if (isHostDisconnected) {
+      toast({
+        title: "Juego Terminado",
+        description: "El anfitrión se ha desconectado",
+        variant: "destructive",
+      })
+
+      // Esperar 2 segundos antes de redirigir
+      const timeout = setTimeout(() => {
+        resetGame()
+        router.push("/")
+      }, 2000)
+
+      return () => clearTimeout(timeout)
+    }
+  }, [isHostDisconnected, router, resetGame, toast])
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
   const isHost = currentPlayer ? players[0]?.id === currentPlayerId : false
@@ -59,10 +90,12 @@ export default function LobbyPage() {
   }
 
   const handleStartGame = async () => {
-    if (players.length < 2) {
+    const connectedPlayers = players.filter((p) => p.isConnected)
+
+    if (connectedPlayers.length < 2) {
       toast({
         title: "Jugadores insuficientes",
-        description: "Se necesitan al menos 2 jugadores para comenzar",
+        description: "Se necesitan al menos 2 jugadores conectados para comenzar",
         variant: "destructive",
       })
       return
@@ -80,6 +113,20 @@ export default function LobbyPage() {
       })
       setIsStarting(false)
     }
+  }
+
+  if (isHostDisconnected) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex items-center justify-center p-4">
+        <Alert className="max-w-md border-destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Juego Terminado</AlertTitle>
+          <AlertDescription>
+            El anfitrión se ha desconectado. Serás redirigido a la página principal...
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
   }
 
   return (
@@ -106,16 +153,32 @@ export default function LobbyPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Users className="w-4 h-4" />
-                <span>Jugadores ({players.length}/4)</span>
+                <span>Jugadores ({players.filter((p) => p.isConnected).length}/4)</span>
               </div>
               <div className="space-y-2">
                 {players.map((player, index) => (
                   <div key={player.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <span className="font-medium">{player.name}</span>
-                    {index === 0 && <Badge variant="secondary">Anfitrión</Badge>}
+                    <div className="flex items-center gap-2">
+                      {player.isConnected ? (
+                        <Wifi className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <WifiOff className="w-4 h-4 text-red-500" />
+                      )}
+                      <span className={player.isConnected ? "font-medium" : "font-medium opacity-50"}>
+                        {player.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {index === 0 && <Badge variant="secondary">Anfitrión</Badge>}
+                      {!player.isConnected && (
+                        <Badge variant="destructive" className="text-xs">
+                          Desconectado
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
-                {players.length < 4 && (
+                {players.filter((p) => p.isConnected).length < 4 && (
                   <div className="flex items-center justify-center p-6 border-2 border-dashed rounded-lg text-muted-foreground">
                     <div className="text-center">
                       <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
@@ -132,7 +195,7 @@ export default function LobbyPage() {
                 className="w-full"
                 size="lg"
                 onClick={handleStartGame}
-                disabled={players.length < 2 || isStarting}
+                disabled={players.filter((p) => p.isConnected).length < 2 || isStarting}
               >
                 <Play className="w-5 h-5 mr-2" />
                 {isStarting ? "Iniciando..." : "Iniciar Partida"}

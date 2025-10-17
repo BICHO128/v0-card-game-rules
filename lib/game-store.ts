@@ -1,7 +1,7 @@
 "use client"
 
 import { create } from "zustand"
-import type { GameCard, Player, GameState } from "./game-types"
+import type { GameCard, Player, GameState, ChatMessage } from "./game-types"
 import { distributeCards, determineFirstPlayer, compareCards, checkGameEnd } from "./game-logic"
 import { getSupabaseClient } from "./supabase-client"
 import type { RealtimeChannel } from "@supabase/supabase-js"
@@ -20,6 +20,8 @@ type GameStore = {
   gameEndReason: string
   currentPlayerId: string | null
   realtimeChannel: RealtimeChannel | null
+  chatMessages: ChatMessage[]
+  isHostDisconnected: boolean
 
   // Acciones
   setCurrentPlayerId: (playerId: string) => void
@@ -32,7 +34,13 @@ type GameStore = {
   selectAttribute: (playerId: string, attributeName: string) => Promise<void>
   resolveRound: () => Promise<void>
   resetGame: () => void
+  sendChatMessage: (message: string) => Promise<void>
+  startHeartbeat: () => void
+  stopHeartbeat: () => void
+  leaveRoom: () => Promise<void>
 }
+
+let heartbeatInterval: NodeJS.Timeout | null = null
 
 export const useGameStore = create<GameStore>((set, get) => ({
   // Estado inicial
@@ -48,6 +56,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   gameEndReason: "",
   currentPlayerId: null,
   realtimeChannel: null,
+  chatMessages: [],
+  isHostDisconnected: false,
 
   setCurrentPlayerId: (playerId: string) => {
     set({ currentPlayerId: playerId })
@@ -84,6 +94,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({ roomCode, currentPlayerId: playerId })
     get().subscribeToRoom(roomCode)
+    get().startHeartbeat()
   },
 
   joinRoom: async (roomCode: string, playerName: string) => {
@@ -122,6 +133,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({ roomCode, currentPlayerId: playerId })
     get().subscribeToRoom(roomCode)
+    get().startHeartbeat()
     return true
   },
 
@@ -186,6 +198,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
           loadCardsInPlay(roomCode)
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: `room_code=eq.${roomCode}`,
+        },
+        (payload) => {
+          console.log("[v0] New chat message:", payload)
+          loadChatMessages(roomCode)
+        },
+      )
       .subscribe((status) => {
         console.log("[v0] Subscription status:", status)
       })
@@ -196,6 +221,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     loadPlayers(roomCode)
     loadGameState(roomCode)
     loadCardsInPlay(roomCode)
+    loadChatMessages(roomCode)
 
     // Función para cargar jugadores
     async function loadPlayers(code: string) {
@@ -219,8 +245,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
           cards: p.cards as GameCard[],
           isActive: p.is_active,
           isConnected: p.is_connected,
+          isHost: p.is_host,
         }))
         set({ players })
+
+        const host = playersData.find((p) => p.is_host)
+        if (host && !host.is_connected) {
+          set({ isHostDisconnected: true })
+        }
       }
     }
 
@@ -262,6 +294,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
         set({ cardsInPlay, tiedCards })
       }
     }
+
+    async function loadChatMessages(code: string) {
+      const { data: messagesData } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("room_code", code)
+        .order("created_at", { ascending: true })
+        .limit(100)
+
+      if (messagesData) {
+        const messages: ChatMessage[] = messagesData.map((m) => ({
+          id: m.id,
+          roomCode: m.room_code,
+          playerId: m.player_id,
+          playerName: m.player_name,
+          message: m.message,
+          createdAt: m.created_at,
+        }))
+        set({ chatMessages: messages })
+      }
+    }
   },
 
   unsubscribeFromRoom: () => {
@@ -271,6 +324,79 @@ export const useGameStore = create<GameStore>((set, get) => ({
       supabase.removeChannel(realtimeChannel)
       set({ realtimeChannel: null })
     }
+  },
+
+  sendChatMessage: async (message: string) => {
+    const { roomCode, currentPlayerId, players } = get()
+    const supabase = getSupabaseClient()
+
+    if (!currentPlayerId || !message.trim()) return
+
+    const currentPlayer = players.find((p) => p.id === currentPlayerId)
+    if (!currentPlayer) return
+
+    await supabase.from("chat_messages").insert({
+      room_code: roomCode,
+      player_id: currentPlayerId,
+      player_name: currentPlayer.name,
+      message: message.trim(),
+    })
+  },
+
+  startHeartbeat: () => {
+    const { roomCode, currentPlayerId } = get()
+    const supabase = getSupabaseClient()
+
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval)
+    }
+
+    // Enviar heartbeat cada 5 segundos
+    heartbeatInterval = setInterval(async () => {
+      if (currentPlayerId && roomCode) {
+        await supabase.rpc("update_player_heartbeat", {
+          p_room_code: roomCode,
+          p_player_id: currentPlayerId,
+        })
+
+        // Marcar jugadores desconectados
+        await supabase.rpc("mark_disconnected_players")
+      }
+    }, 5000)
+
+    // Enviar heartbeat inmediatamente
+    if (currentPlayerId && roomCode) {
+      supabase.rpc("update_player_heartbeat", {
+        p_room_code: roomCode,
+        p_player_id: currentPlayerId,
+      })
+    }
+  },
+
+  stopHeartbeat: () => {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval)
+      heartbeatInterval = null
+    }
+  },
+
+  leaveRoom: async () => {
+    const { roomCode, currentPlayerId } = get()
+    const supabase = getSupabaseClient()
+
+    if (!currentPlayerId || !roomCode) return
+
+    // Marcar como desconectado
+    await supabase
+      .from("game_players")
+      .update({ is_connected: false })
+      .eq("room_code", roomCode)
+      .eq("player_id", currentPlayerId)
+
+    get().stopHeartbeat()
+
+    // Desuscribirse
+    get().unsubscribeFromRoom()
   },
 
   startGame: async () => {
@@ -420,6 +546,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           cards: p.cards as GameCard[],
           isActive: p.is_active,
           isConnected: p.is_connected,
+          isHost: p.is_host,
         }))
 
         const gameEnd = checkGameEnd(updatedPlayers, startTime)
@@ -450,6 +577,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   // Reiniciar el juego
   resetGame: () => {
+    get().stopHeartbeat()
     get().unsubscribeFromRoom()
     set({
       roomCode: "",
@@ -463,6 +591,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       winnerId: null,
       gameEndReason: "",
       currentPlayerId: null,
+      chatMessages: [],
+      isHostDisconnected: false,
     })
   },
 }))

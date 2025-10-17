@@ -8,7 +8,9 @@ import { PlayerHand } from "@/components/player-hand"
 import { GameHeader } from "@/components/game-header"
 import { GameResults } from "@/components/game-results"
 import { GameTimer } from "@/components/game-timer"
-import { Loader2 } from "lucide-react"
+import { GameChat } from "@/components/game-chat"
+import { Loader2, AlertCircle } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function GamePage() {
   const params = useParams()
@@ -20,8 +22,11 @@ export default function GamePage() {
   const currentTurnPlayerId = useGameStore((state) => state.currentTurnPlayerId)
   const startTime = useGameStore((state) => state.startTime)
   const currentPlayerId = useGameStore((state) => state.currentPlayerId)
+  const isHostDisconnected = useGameStore((state) => state.isHostDisconnected)
   const subscribeToRoom = useGameStore((state) => state.subscribeToRoom)
   const unsubscribeFromRoom = useGameStore((state) => state.unsubscribeFromRoom)
+  const leaveRoom = useGameStore((state) => state.leaveRoom)
+  const resetGame = useGameStore((state) => state.resetGame)
 
   const [isLoading, setIsLoading] = useState(true)
 
@@ -36,10 +41,29 @@ export default function GamePage() {
     subscribeToRoom(roomCode)
     setIsLoading(false)
 
+    const handleBeforeUnload = () => {
+      leaveRoom()
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
     return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
       unsubscribeFromRoom()
     }
-  }, [roomCode, currentPlayerId, router, subscribeToRoom, unsubscribeFromRoom])
+  }, [roomCode, currentPlayerId, router, subscribeToRoom, unsubscribeFromRoom, leaveRoom])
+
+  useEffect(() => {
+    if (isHostDisconnected) {
+      // Esperar 2 segundos antes de redirigir
+      const timeout = setTimeout(() => {
+        resetGame()
+        router.push("/")
+      }, 2000)
+
+      return () => clearTimeout(timeout)
+    }
+  }, [isHostDisconnected, router, resetGame])
 
   const handleTimeUp = async () => {
     const { players } = useGameStore.getState()
@@ -67,6 +91,20 @@ export default function GamePage() {
           <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
           <p className="text-lg text-muted-foreground">Preparando el juego...</p>
         </div>
+      </div>
+    )
+  }
+
+  if (isHostDisconnected) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex items-center justify-center p-4">
+        <Alert className="max-w-md">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Juego Terminado</AlertTitle>
+          <AlertDescription>
+            El anfitrión se ha desconectado. Serás redirigido a la página principal...
+          </AlertDescription>
+        </Alert>
       </div>
     )
   }
@@ -100,6 +138,8 @@ export default function GamePage() {
           />
         )}
       </div>
+
+      {gameState === "playing" && <GameChat />}
     </div>
   )
 }

@@ -17,6 +17,7 @@ export type Player = {
   cards: GameCard[]
   isActive: boolean
   isConnected: boolean
+  isHost: boolean
 }
 
 export type GameState = "lobby" | "playing" | "finished"
@@ -70,5 +71,23 @@ export type DatabaseCardInPlay = {
   player_id: string
   card: GameCard
   is_tied: boolean
+  created_at: string
+}
+
+export type ChatMessage = {
+  id: string
+  roomCode: string
+  playerId: string
+  playerName: string
+  message: string
+  createdAt: string
+}
+
+export type DatabaseChatMessage = {
+  id: string
+  room_code: string
+  player_id: string
+  player_name: string
+  message: string
   created_at: string
 }
