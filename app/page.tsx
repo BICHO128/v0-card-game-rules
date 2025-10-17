@@ -17,21 +17,22 @@ export default function HomePage() {
   const createRoom = useGameStore((state) => state.createRoom)
   const joinRoom = useGameStore((state) => state.joinRoom)
 
-  const [playerName, setPlayerName] = useState("")
+  const [createPlayerName, setCreatePlayerName] = useState("")
+  const [joinPlayerName, setJoinPlayerName] = useState("")
   const [roomCode, setRoomCode] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
 
   const handleCreateRoom = async () => {
-    if (!playerName.trim()) return
+    if (!createPlayerName.trim()) return
     setIsCreating(true)
 
     try {
       const code = generateRoomCode()
-      await createRoom(code, playerName)
+      await createRoom(code, createPlayerName)
 
       // Guardar en localStorage para persistencia
-      localStorage.setItem("playerName", playerName)
+      localStorage.setItem("playerName", createPlayerName)
       localStorage.setItem("roomCode", code)
 
       router.push(`/lobby/${code}`)
@@ -47,16 +48,16 @@ export default function HomePage() {
   }
 
   const handleJoinRoom = async () => {
-    if (!playerName.trim() || !roomCode.trim()) return
+    if (!joinPlayerName.trim() || !roomCode.trim()) return
     setIsJoining(true)
 
     try {
       const code = roomCode.toUpperCase()
-      const success = await joinRoom(code, playerName)
+      const success = await joinRoom(code, joinPlayerName)
 
       if (success) {
         // Guardar en localStorage para persistencia
-        localStorage.setItem("playerName", playerName)
+        localStorage.setItem("playerName", joinPlayerName)
         localStorage.setItem("roomCode", code)
 
         router.push(`/lobby/${code}`)
@@ -111,8 +112,8 @@ export default function HomePage() {
                 <Input
                   id="create-name"
                   placeholder="Ingresa tu nombre"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
+                  value={createPlayerName}
+                  onChange={(e) => setCreatePlayerName(e.target.value)}
                   maxLength={20}
                 />
               </div>
@@ -120,7 +121,7 @@ export default function HomePage() {
                 className="w-full"
                 size="lg"
                 onClick={handleCreateRoom}
-                disabled={!playerName.trim() || isCreating}
+                disabled={!createPlayerName.trim() || isCreating}
               >
                 {isCreating ? "Creando..." : "Crear Sala"}
               </Button>
@@ -142,8 +143,8 @@ export default function HomePage() {
                 <Input
                   id="join-name"
                   placeholder="Ingresa tu nombre"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
+                  value={joinPlayerName}
+                  onChange={(e) => setJoinPlayerName(e.target.value)}
                   maxLength={20}
                 />
               </div>
@@ -163,7 +164,7 @@ export default function HomePage() {
                 size="lg"
                 variant="secondary"
                 onClick={handleJoinRoom}
-                disabled={!playerName.trim() || !roomCode.trim() || isJoining}
+                disabled={!joinPlayerName.trim() || !roomCode.trim() || isJoining}
               >
                 {isJoining ? "Uniéndose..." : "Unirse a Sala"}
               </Button>
